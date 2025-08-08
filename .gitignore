@@ -4,3 +4,4 @@ azureEnv/
 # Byte-compiled / cache files
 __pycache__/
 *.py[cod]
+".env" 
