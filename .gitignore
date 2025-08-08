@@ -1,0 +1,6 @@
+# Ignore Python environment
+azureEnv/
+
+# Byte-compiled / cache files
+__pycache__/
+*.py[cod]
