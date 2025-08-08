@@ -1,46 +1,61 @@
 import os
 import urllib.parse
+
 import pandas as pd
 import streamlit as st
 import altair as alt
+
 from sqlalchemy import create_engine
 from dotenv import load_dotenv
 
-# ── 0. Load local .env if present ───────────────────────────────────────────
+# ── 0. load local .env (harmless if it doesn’t exist) ──────────────────────
 load_dotenv()
 
-# ── 1. Helper to prefer st.secrets on Cloud, then os.environ ────────────────
-def get_cfg(key: str, default: str = "") -> str:
-    return st.secrets.get(key, default) or os.getenv(key, default)
+# ── 1. helper to prefer st.secrets in Cloud, then os.environ ───────────────
+def get_cfg(key: str) -> str:
+    # st.secrets.get will return the value from secrets.toml or UI; default=None
+    return st.secrets.get(key) or os.getenv(key)
 
-# ── 2. Build SQLAlchemy engine (cached) ────────────────────────────────────
+# ── 2. sanity-check that all five vars exist ────────────────────────────────
+REQUIRED = ["DRIVER", "SERVER", "DATABASE", "UID", "PWD"]
+missing  = [k for k in REQUIRED if not get_cfg(k)]
+if missing:
+    st.error(
+        "🚨 Missing configuration for: " +
+        ", ".join(missing) +
+        ".\n\n"
+        "Locally, put them in a `.env` file (no inline comments).\n"
+        "On Cloud, either commit them to `.streamlit/secrets.toml` or "
+        "paste them into the Secrets panel."
+    )
+    st.stop()  # nothing else can run without those
+
+# ── 3. Build the SQLAlchemy engine ──────────────────────────────────────────
 @st.cache_resource(show_spinner=False)
 def get_engine():
-    driver   = get_cfg("DRIVER")
+    driver   = urllib.parse.quote_plus(get_cfg("DRIVER"))
     server   = get_cfg("SERVER")
     database = get_cfg("DATABASE")
     uid      = get_cfg("UID")
     pwd      = urllib.parse.quote_plus(get_cfg("PWD"))
-    port     = get_cfg("DB_PORT", "1433")
-    # URL-encode the driver name
-    driver_enc = urllib.parse.quote_plus(driver)
+    # default port 1433; tweak if you need to
+    port     = get_cfg("DB_PORT") or "1433"
 
-    connection_string = (
+    conn_str = (
         f"mssql+pyodbc://{uid}:{pwd}@{server}:{port}/{database}"
-        f"?driver={driver_enc}"
+        f"?driver={driver}"
         "&Encrypt=yes&TrustServerCertificate=no&Connection+Timeout=30"
     )
-    return create_engine(connection_string)
+    return create_engine(conn_str)
 
-# ── 3. Read data (cached – refresh every 10 min) ─────────────────────────────
-@st.cache_data(ttl=600, show_spinner="Loading data …")
+# ── 4. Load data (cached for 10 min) ───────────────────────────────────────
+@st.cache_data(ttl=600, show_spinner="Loading data…")
 def load_data():
-    sql = "SELECT * FROM dbo.Clothes"
-    return pd.read_sql(sql, get_engine())
+    return pd.read_sql("SELECT * FROM dbo.Clothes", get_engine())
 
 df = load_data()
 
-# ── 4. Sidebar filters ───────────────────────────────────────────────────────
+# ── 5. Your UI ─────────────────────────────────────────────────────────────
 st.sidebar.header("Filters")
 
 cat_sel   = st.sidebar.multiselect(
